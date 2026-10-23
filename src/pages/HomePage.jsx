@@ -195,7 +195,7 @@ export default function HomePage({
     ],
   );
 
-  const { ratingsMap, ageLimitSetting } = useRatings(allItems);
+  const { ratingsMap, ageLimitSetting } = useRatings(allItems, apiKey);
 
   const getRating = useCallback(
     (item) => getRatingForItem(item, ratingsMap),

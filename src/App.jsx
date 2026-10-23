@@ -1117,6 +1117,7 @@ export default function App() {
             )}
             {page === "history" && (
               <LibraryPage
+                apiKey={apiKey}
                 history={history}
                 inProgress={inProgress}
                 saved={savedList}

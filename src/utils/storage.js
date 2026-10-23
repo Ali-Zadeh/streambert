@@ -99,8 +99,6 @@ export const STORAGE_KEYS = {
   GAMEPAD_ENABLED: "gamepadEnabled",
 };
 
-export const getApiKey = () => storage.get(STORAGE_KEYS.API_KEY);
-
 // ── Source failover cache ────────────────────────────────────────────────────
 // AllManga doesn't always have every episode; rather than nag the user every
 // time, remember the working alternate source per (tmdbId, season, ep, dub).

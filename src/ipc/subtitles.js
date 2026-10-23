@@ -507,18 +507,19 @@ function register({ getDownloads, saveDownloads }) {
   // ── Delete a single subtitle file ─────────────────────────────────────────
   ipcMain.handle("delete-subtitle-file", (_, { downloadId, subtitlePath }) => {
     try {
-      if (subtitlePath && fs.existsSync(subtitlePath))
-        fs.unlinkSync(subtitlePath);
-      if (downloadId) {
-        const downloads = getDownloads();
-        const idx = downloads.findIndex((d) => d.id === downloadId);
-        if (idx >= 0) {
-          downloads[idx].subtitlePaths = (
-            downloads[idx].subtitlePaths || []
-          ).filter((sp) => sp.path !== subtitlePath);
-          saveDownloads();
-        }
+      const downloads = getDownloads();
+      const idx = downloads.findIndex((d) => d.id === downloadId);
+      const owned = (downloads[idx]?.subtitlePaths || []).some(
+        (sp) => sp.path === subtitlePath,
+      );
+      if (!subtitlePath || !owned) {
+        return { ok: false, error: "Unknown subtitle file" };
       }
+      if (fs.existsSync(subtitlePath)) fs.unlinkSync(subtitlePath);
+      downloads[idx].subtitlePaths = downloads[idx].subtitlePaths.filter(
+        (sp) => sp.path !== subtitlePath,
+      );
+      saveDownloads();
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e.message };

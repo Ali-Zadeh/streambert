@@ -11,6 +11,7 @@ const {
   Notification,
 } = require("electron");
 const path = require("path");
+const { fileURLToPath } = require("url");
 
 // -- RAM / performance flags ---------------------------------------------------
 app.commandLine.appendSwitch(
@@ -284,7 +285,30 @@ function createWindow() {
     );
   });
 
-  mainWindow.loadFile(path.join(__dirname, "dist/index.html"));
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const appPage = path.join(__dirname, "dist/index.html");
+  mainWindow.webContents.on("will-navigate", (e, url) => {
+    let target;
+    try {
+      target = new URL(url);
+    } catch {}
+    if (target?.protocol !== "file:" || fileURLToPath(target) !== appPage) {
+      e.preventDefault();
+    }
+  });
+  mainWindow.webContents.on(
+    "will-attach-webview",
+    (e, webPreferences, params) => {
+      delete webPreferences.preload;
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
+      if (!["persist:player", "persist:trailer"].includes(params.partition)) {
+        e.preventDefault();
+      }
+    },
+  );
+
+  mainWindow.loadFile(appPage);
 
   // Trigger scheduled backup after load
   mainWindow.webContents.once("did-finish-load", () => {

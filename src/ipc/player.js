@@ -5,7 +5,6 @@ const { spawn, spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
-const http = require("http");
 const os = require("os");
 
 let _updateAbortController = null;
@@ -335,14 +334,16 @@ function register(getMainWindow, { writeSecretMigration }) {
           } catch {
             return reject(new Error("Invalid redirect URL"));
           }
+          if (reqParsed.protocol !== "https:") {
+            return reject(new Error("Update download must use HTTPS"));
+          }
           if (!ALLOWED_REDIRECT_HOSTS.includes(reqParsed.hostname)) {
             return reject(
               new Error(`Untrusted redirect host: ${reqParsed.hostname}`),
             );
           }
 
-          const lib = reqUrl.startsWith("https") ? https : http;
-          const req = lib.get(
+          const req = https.get(
             reqUrl,
             {
               headers: {

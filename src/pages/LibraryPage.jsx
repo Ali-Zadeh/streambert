@@ -7,6 +7,7 @@ import { isRestricted } from "../utils/ageRating";
 import { storage, STORAGE_KEYS } from "../utils/storage";
 
 export default function LibraryPage({
+  apiKey,
   history,
   inProgress,
   saved,
@@ -21,7 +22,7 @@ export default function LibraryPage({
     () => [...inProgress, ...saved],
     [inProgress, saved],
   );
-  const { ratingsMap, ageLimitSetting } = useRatings(allItems);
+  const { ratingsMap, ageLimitSetting } = useRatings(allItems, apiKey);
 
   const [sort, setSort] = useState(
     () => storage.get(STORAGE_KEYS.LIBRARY_SORT) || "manual",

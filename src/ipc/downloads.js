@@ -35,8 +35,14 @@ function sendProgress(update) {
 }
 
 function loadDownloads() {
+  let raw;
   try {
-    const raw = fs.readFileSync(downloadsFile(), "utf8");
+    raw = fs.readFileSync(downloadsFile(), "utf8");
+  } catch {
+    downloads = [];
+    return;
+  }
+  try {
     const parsed = JSON.parse(raw);
     // Deduplicate: keep only the newest entry per (tmdbId, mediaType, season, episode)
     const seen = new Map();
@@ -54,6 +60,12 @@ function loadDownloads() {
     }
     downloads = [...seen.values()];
   } catch {
+    try {
+      fs.renameSync(
+        downloadsFile(),
+        `${downloadsFile()}.corrupt-${Date.now()}`,
+      );
+    } catch {}
     downloads = [];
   }
 }
@@ -63,7 +75,9 @@ function saveDownloads() {
     const toSave = downloads.filter(
       (d) => d.status !== "downloading" && d.status !== "error",
     );
-    fs.writeFileSync(downloadsFile(), JSON.stringify(toSave, null, 2));
+    const tmp = `${downloadsFile()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(toSave, null, 2));
+    fs.renameSync(tmp, downloadsFile());
   } catch {}
 }
 
@@ -728,7 +742,7 @@ function register(getMainWindow) {
         } catch {}
         activeProcs.delete(id);
       }
-      if (filePath) {
+      if (filePath && filePath === dlEntry?.filePath) {
         try {
           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         } catch {}
@@ -791,9 +805,23 @@ function register(getMainWindow) {
     return { bytes };
   });
 
+  const openFolder = (dir) => {
+    try {
+      if (!fs.statSync(dir).isDirectory()) return;
+    } catch {
+      return;
+    }
+    if (fs.existsSync(path.join(dir, "Contents", "Info.plist"))) {
+      shell.showItemInFolder(dir);
+    } else {
+      shell.openPath(dir);
+    }
+  };
+
   ipcMain.handle("show-in-folder", (_, filePath) => {
-    if (filePath && fs.existsSync(filePath)) shell.showItemInFolder(filePath);
-    else shell.openPath(path.dirname(filePath || ""));
+    if (!filePath) return;
+    if (fs.existsSync(filePath)) shell.showItemInFolder(filePath);
+    else openFolder(path.dirname(filePath));
   });
 
   ipcMain.handle("file-exists", (_, filePath) => {
@@ -826,16 +854,9 @@ function register(getMainWindow) {
     // If the path points to a file (e.g. an .asar archive or an executable),
     // open its containing folder instead so the OS file manager actually shows something
     try {
-      const stat = fs.statSync(filePath);
-      if (stat.isDirectory()) {
-        shell.openPath(filePath);
-      } else {
-        shell.showItemInFolder(filePath);
-      }
-    } catch {
-      // Path doesn't exist or stat failed
-      shell.openPath(filePath);
-    }
+      if (fs.statSync(filePath).isDirectory()) openFolder(filePath);
+      else shell.showItemInFolder(filePath);
+    } catch {}
   });
   ipcMain.handle("get-install-path", () => {
     if (process.env.APPIMAGE) {

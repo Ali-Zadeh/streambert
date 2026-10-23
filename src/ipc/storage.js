@@ -19,9 +19,22 @@ let _secureStoreCache = null;
 
 function readSecureStore() {
   if (_secureStoreCache) return _secureStoreCache;
+  let raw;
   try {
-    _secureStoreCache = JSON.parse(fs.readFileSync(secureStoreFile(), "utf8"));
+    raw = fs.readFileSync(secureStoreFile(), "utf8");
   } catch {
+    _secureStoreCache = {};
+    return _secureStoreCache;
+  }
+  try {
+    _secureStoreCache = JSON.parse(raw);
+  } catch {
+    try {
+      fs.renameSync(
+        secureStoreFile(),
+        `${secureStoreFile()}.corrupt-${Date.now()}`,
+      );
+    } catch {}
     _secureStoreCache = {};
   }
   return _secureStoreCache;
@@ -29,7 +42,9 @@ function readSecureStore() {
 
 function writeSecureStore(data) {
   _secureStoreCache = data;
-  fs.writeFileSync(secureStoreFile(), JSON.stringify(data));
+  const tmp = `${secureStoreFile()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data));
+  fs.renameSync(tmp, secureStoreFile());
 }
 
 function secureStoreGet(key) {

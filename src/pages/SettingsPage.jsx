@@ -3537,6 +3537,9 @@ export default function SettingsPage({
     storage.remove(STORAGE_KEYS.WATCH_PROGRESS);
     storage.remove(STORAGE_KEYS.HISTORY);
     storage.remove(STORAGE_KEYS.WATCHED);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("streambert_dlTime_")) localStorage.removeItem(key);
+    }
     if (isElectron) await window.electron.clearWatchData();
     setTimeout(() => window.location.reload(), 800);
     return { msg: "✓ Watch data cleared" };

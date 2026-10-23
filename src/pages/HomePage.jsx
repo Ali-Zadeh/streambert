@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import MediaCard from "../components/MediaCard";
 import TrendingCarousel from "../components/TrendingCarousel";
 import { PlayIcon, StarIcon } from "../components/Icons";
@@ -32,6 +32,67 @@ function getRecentHistoryItems(history, count = 5) {
   return unique;
 }
 
+const SHOW_MORE_STEP = 10;
+
+function useShowMore(baseItems, initialCount, fetchPage) {
+  const [count, setCount] = useState(initialCount);
+  const [extraItems, setExtraItems] = useState([]);
+  const [nextPage, setNextPage] = useState(2);
+  const [exhausted, setExhausted] = useState(!fetchPage);
+  const [loading, setLoading] = useState(false);
+  const generation = useRef(0);
+
+  useEffect(() => {
+    generation.current++;
+    setCount(initialCount);
+    setExtraItems([]);
+    setNextPage(2);
+    setExhausted(!fetchPage);
+    setLoading(false);
+  }, [baseItems, initialCount, fetchPage]);
+
+  const items = useMemo(() => {
+    const seen = new Set();
+    return [...baseItems, ...extraItems].filter((item) => {
+      const key = `${item.media_type}_${item.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [baseItems, extraItems]);
+
+  const visible = useMemo(() => items.slice(0, count), [items, count]);
+
+  const showMore = useCallback(async () => {
+    const target = count + SHOW_MORE_STEP;
+    if (items.length >= target || exhausted) {
+      setCount(target);
+      return;
+    }
+    const gen = generation.current;
+    setLoading(true);
+    try {
+      const { results, totalPages } = await fetchPage(nextPage);
+      if (gen !== generation.current) return;
+      setExtraItems((prev) => [...prev, ...results]);
+      setNextPage(nextPage + 1);
+      if (results.length === 0 || nextPage >= totalPages) setExhausted(true);
+      setCount(target);
+    } catch (e) {
+      console.warn("Show more fetch failed", e);
+    } finally {
+      if (gen === generation.current) setLoading(false);
+    }
+  }, [count, items.length, exhausted, fetchPage, nextPage]);
+
+  return {
+    visible,
+    hasMore: count < items.length || !exhausted,
+    loading,
+    showMore,
+  };
+}
+
 export default function HomePage({
   trending,
   trendingTV,
@@ -58,16 +119,80 @@ export default function HomePage({
 
   const [viewMode] = useState(() => loadHomeViewMode());
 
+  const trendingMovieItems = useMemo(
+    () => trending.map((i) => ({ ...i, media_type: "movie" })),
+    [trending],
+  );
+  const trendingTVItems = useMemo(
+    () => trendingTV.map((i) => ({ ...i, media_type: "tv" })),
+    [trendingTV],
+  );
+
+  const fetchTrendingPage = useMemo(() => {
+    const byType = (type) => (page) =>
+      tmdbFetch(`/trending/${type}/week?page=${page}`, apiKey).then((d) => ({
+        results: (d.results || []).map((i) => ({ ...i, media_type: type })),
+        totalPages: d.total_pages || page,
+      }));
+    return { movie: byType("movie"), tv: byType("tv") };
+  }, [apiKey]);
+
+  const fetchTopRatedPage = useCallback(
+    (page) =>
+      Promise.all([
+        tmdbFetch(`/movie/top_rated?page=${page}`, apiKey),
+        tmdbFetch(`/tv/top_rated?page=${page}`, apiKey),
+      ]).then(([moviesData, tvData]) => {
+        const movies = (moviesData.results || []).map((i) => ({
+          ...i,
+          media_type: "movie",
+        }));
+        const tv = (tvData.results || []).map((i) => ({
+          ...i,
+          media_type: "tv",
+        }));
+        const results = [];
+        const max = Math.max(movies.length, tv.length);
+        for (let i = 0; i < max; i++) {
+          if (movies[i]) results.push(movies[i]);
+          if (tv[i]) results.push(tv[i]);
+        }
+        return {
+          results,
+          totalPages: Math.max(
+            moviesData.total_pages || page,
+            tvData.total_pages || page,
+          ),
+        };
+      }),
+    [apiKey],
+  );
+
+  const trendingMoviesRow = useShowMore(
+    trendingMovieItems,
+    10,
+    fetchTrendingPage.movie,
+  );
+  const trendingTVRow = useShowMore(trendingTVItems, 10, fetchTrendingPage.tv);
+  const recommendedRow = useShowMore(recommendedItems, 20);
+  const topRatedRow = useShowMore(topRatedItems, 16, fetchTopRatedPage);
+
   // All items for batch ratings fetch
   const allItems = useMemo(
     () => [
       ...inProgress,
-      ...trending.map((i) => ({ ...i, media_type: "movie" })),
-      ...trendingTV.map((i) => ({ ...i, media_type: "tv" })),
-      ...recommendedItems,
-      ...topRatedItems,
+      ...trendingMoviesRow.visible,
+      ...trendingTVRow.visible,
+      ...recommendedRow.visible,
+      ...topRatedRow.visible,
     ],
-    [inProgress, trending, trendingTV, recommendedItems, topRatedItems],
+    [
+      inProgress,
+      trendingMoviesRow.visible,
+      trendingTVRow.visible,
+      recommendedRow.visible,
+      topRatedRow.visible,
+    ],
   );
 
   const { ratingsMap, ageLimitSetting } = useRatings(allItems);
@@ -94,8 +219,8 @@ export default function HomePage({
 
   // Filter recommended items that exceed age limit setting
   const filteredRecommendedItems = useMemo(() => {
-    return recommendedItems.filter((item) => !itemRestricted(item));
-  }, [recommendedItems, itemRestricted]);
+    return recommendedRow.visible.filter((item) => !itemRestricted(item));
+  }, [recommendedRow.visible, itemRestricted]);
 
   // Fetch personalised recommendations from multiple recent history items
   useEffect(() => {
@@ -152,7 +277,7 @@ export default function HomePage({
           return true;
         });
 
-        setRecommendedItems(deduped.slice(0, 20));
+        setRecommendedItems(deduped);
       })
       .catch((e) => {
         if (e.name !== "AbortError")
@@ -166,45 +291,10 @@ export default function HomePage({
   // Fetch top rated movies + TV, merge and shuffle
   useEffect(() => {
     if (!apiKey || offline) return;
-    const controller = new AbortController();
-    Promise.all([
-      tmdbFetch("/movie/top_rated?page=1", apiKey, {
-        signal: controller.signal,
-      }),
-      tmdbFetch("/tv/top_rated?page=1", apiKey, { signal: controller.signal }),
-    ])
-      .then(([moviesData, tvData]) => {
-        const movies = (moviesData.results || [])
-          .slice(0, 8)
-          .map((i) => ({ ...i, media_type: "movie" }));
-        const tv = (tvData.results || [])
-          .slice(0, 8)
-          .map((i) => ({ ...i, media_type: "tv" }));
-        // Interleave movies and TV for variety
-        const merged = [];
-        const max = Math.max(movies.length, tv.length);
-        for (let i = 0; i < max; i++) {
-          if (movies[i]) merged.push(movies[i]);
-          if (tv[i]) merged.push(tv[i]);
-        }
-        setTopRatedItems(merged);
-      })
-      .catch((e) => {
-        if (e.name !== "AbortError") console.warn("Top rated fetch failed", e);
-      });
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey, offline]);
-
-  // Stable pre-built item arrays for carousels, capped at 10
-  const trendingMovieItems = useMemo(
-    () => trending.slice(0, 10).map((i) => ({ ...i, media_type: "movie" })),
-    [trending],
-  );
-  const trendingTVItems = useMemo(
-    () => trendingTV.slice(0, 10).map((i) => ({ ...i, media_type: "tv" })),
-    [trendingTV],
-  );
+    fetchTopRatedPage(1)
+      .then(({ results }) => setTopRatedItems(results))
+      .catch((e) => console.warn("Top rated fetch failed", e));
+  }, [apiKey, offline, fetchTopRatedPage]);
 
   return (
     <div className="fade-in">
@@ -320,7 +410,7 @@ export default function HomePage({
         }
 
         // Render a section as a flat cards-grid (list view)
-        const renderList = (key, title, titleHighlight, items) => {
+        const renderList = (key, title, titleHighlight, items, row) => {
           if (!items || items.length === 0) return null;
           return (
             <div key={key} className="section">
@@ -356,6 +446,23 @@ export default function HomePage({
                   );
                 })}
               </div>
+              {row.hasMore && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    marginTop: 16,
+                  }}
+                >
+                  <button
+                    className="btn btn-secondary"
+                    onClick={row.showMore}
+                    disabled={row.loading}
+                  >
+                    {row.loading ? "Loading…" : "Show more"}
+                  </button>
+                </div>
+              )}
             </div>
           );
         };
@@ -368,6 +475,7 @@ export default function HomePage({
               "Recommended for You",
               null,
               filteredRecommendedItems,
+              recommendedRow,
             );
           return (
             <TrendingCarousel
@@ -381,18 +489,19 @@ export default function HomePage({
         }
 
         if (id === "trendingMovies") {
-          if (trendingMovieItems.length === 0) return null;
+          if (trendingMoviesRow.visible.length === 0) return null;
           if (viewMode === "list")
             return renderList(
               "trendingMovies",
               "Trending Movies",
               null,
-              trendingMovieItems,
+              trendingMoviesRow.visible,
+              trendingMoviesRow,
             );
           return (
             <TrendingCarousel
               key="trendingMovies"
-              items={trendingMovieItems}
+              items={trendingMoviesRow.visible}
               title="Trending Movies"
               onSelect={onSelect}
               ratingsMap={enrichedRatingsMap}
@@ -401,18 +510,19 @@ export default function HomePage({
         }
 
         if (id === "trendingTV") {
-          if (trendingTVItems.length === 0) return null;
+          if (trendingTVRow.visible.length === 0) return null;
           if (viewMode === "list")
             return renderList(
               "trendingTV",
               "Trending Series",
               null,
-              trendingTVItems,
+              trendingTVRow.visible,
+              trendingTVRow,
             );
           return (
             <TrendingCarousel
               key="trendingTV"
-              items={trendingTVItems}
+              items={trendingTVRow.visible}
               title="Trending Series"
               onSelect={onSelect}
               ratingsMap={enrichedRatingsMap}
@@ -423,11 +533,17 @@ export default function HomePage({
         if (id === "topRated") {
           if (topRatedItems.length === 0) return null;
           if (viewMode === "list")
-            return renderList("topRated", "Top Rated", null, topRatedItems);
+            return renderList(
+              "topRated",
+              "Top Rated",
+              null,
+              topRatedRow.visible,
+              topRatedRow,
+            );
           return (
             <TrendingCarousel
               key="topRated"
-              items={topRatedItems}
+              items={topRatedRow.visible}
               title="Top Rated"
               onSelect={onSelect}
               ratingsMap={enrichedRatingsMap}

@@ -191,6 +191,6 @@ export async function clearAppCaches() {
   localStorage.removeItem("streambert_episodeGroupCache");
   localStorage.removeItem("streambert_aniskipCache");
   for (const key of Object.keys(localStorage)) {
-    if (key.startsWith("dlDur_")) localStorage.removeItem(key);
+    if (key.startsWith(PREFIX + "dlDur_")) localStorage.removeItem(key);
   }
 }

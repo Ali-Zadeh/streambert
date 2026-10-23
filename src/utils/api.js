@@ -287,6 +287,7 @@ query ($search: String, $type: MediaType) {
         relationType
         node {
           id
+          idMal
           type
           format
           title { romaji english }
@@ -381,6 +382,8 @@ export const fetchAnilistData = async (
         variables: { search: title, type },
       }),
     });
+    // AniList answers "no match" with 404, which is a real result worth caching
+    if (!res.ok && res.status !== 404) throw new Error(`AniList ${res.status}`);
     const json = await res.json();
     const data = json?.data?.Media || null;
 
@@ -407,6 +410,7 @@ export const buildAnilistSeasons = (anilistData) => {
 
   const main = {
     id: anilistData.id,
+    idMal: anilistData.idMal || null,
     title:
       anilistData.title?.english ||
       anilistData.title?.romaji ||
@@ -426,6 +430,7 @@ export const buildAnilistSeasons = (anilistData) => {
     )
     .map((e) => ({
       id: e.node.id,
+      idMal: e.node.idMal || null,
       title: e.node.title?.english || e.node.title?.romaji,
       episodes: e.node.episodes || null,
       year: e.node.startDate?.year || e.node.seasonYear || 9999,

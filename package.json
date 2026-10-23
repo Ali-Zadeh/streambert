@@ -22,10 +22,8 @@
     "dist:mac": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac --universal --publish never"
   },
   "dependencies": {
-    "approve": "^0.0.12",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "scripts": "^0.1.0"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.7.0",
@@ -63,6 +61,7 @@
       "src/ipc/**/*",
       "index.js",
       "preload.js",
+      "popout-preload.js",
       "package.json",
       "!**/*.map",
       "!**/*.md",
@@ -102,6 +101,7 @@
       ]
     },
     "mac": {
+      "identity": null,
       "icon": "public/icon.png",
       "target": [
         {

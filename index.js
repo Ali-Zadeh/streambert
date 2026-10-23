@@ -232,6 +232,16 @@ function createWindow() {
     },
   });
 
+  // Push maximize state to the renderer so WindowTitlebar doesn't need to poll
+  const pushMaximized = (v) => {
+    if (mainWindow && !mainWindow.isDestroyed())
+      mainWindow.webContents.send("window-maximized", v);
+  };
+  mainWindow.on("maximize", () => pushMaximized(true));
+  mainWindow.on("unmaximize", () => pushMaximized(false));
+  mainWindow.on("enter-full-screen", () => pushMaximized(true));
+  mainWindow.on("leave-full-screen", () => pushMaximized(false));
+
   // Force long-lived disk caching for TMDB images in the default session.
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: ["*://image.tmdb.org/*"] },
@@ -502,6 +512,7 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     _bench("app ready");
+    playerIpc.registerAudioDeviceRecovery();
     createWindow();
   });
   app.on("window-all-closed", () => app.quit());

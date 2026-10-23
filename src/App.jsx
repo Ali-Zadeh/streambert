@@ -341,7 +341,7 @@ export default function App() {
     let mounted = true;
     secureStorage.get("apikey").then((val) => {
       if (!mounted) return;
-      setApiKey(val || null);
+      setApiKey(val || import.meta.env.VITE_TMDB_TOKEN || null);
       setApiKeyLoaded(true);
     });
     return () => {
@@ -1071,6 +1071,7 @@ export default function App() {
             )}
             {page === "movie" && selected && (
               <MoviePage
+                key={selected.id}
                 item={selected}
                 apiKey={apiKey}
                 playerSettings={playerSettings}
@@ -1094,6 +1095,7 @@ export default function App() {
             )}
             {page === "tv" && selected && (
               <TVPage
+                key={`${selected.id}-${selected.season ?? ""}`}
                 item={selected}
                 apiKey={apiKey}
                 playerSettings={playerSettings}

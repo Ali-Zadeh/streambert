@@ -168,7 +168,7 @@ function parseEpisodeSourceUrls(body) {
 
 function httpsGet(urlStr) {
   return new Promise((resolve, reject) => {
-    function doGet(url) {
+    function doGet(url, redirectsLeft = 5) {
       const u = new URL(url);
       const req = https.request(
         {
@@ -194,7 +194,11 @@ function httpsGet(urlStr) {
               ? res.headers.location
               : new URL(res.headers.location, url).href;
             res.resume();
-            doGet(loc);
+            if (redirectsLeft === 0) {
+              reject(new Error("too many redirects"));
+              return;
+            }
+            doGet(loc, redirectsLeft - 1);
             return;
           }
           let data = "";
@@ -647,6 +651,7 @@ let _playerServer = null;
 let _currentVideoUrl = null;
 let _currentVideoReferer = "https://allmanga.to";
 let _currentVideoStartTime = 0;
+const _proxyToken = crypto.randomBytes(16).toString("hex");
 
 function buildPlayerHtml(videoUrl, startTime) {
   const isM3u8 = videoUrl.includes(".m3u8");
@@ -654,7 +659,7 @@ function buildPlayerHtml(videoUrl, startTime) {
 <html><head><meta charset="utf-8">
 <style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;background:#000;overflow:hidden}video{width:100%;height:100%;object-fit:contain;display:block}</style>
 </head><body>
-<video id="v" src="${isM3u8 ? "" : "/proxy?url=" + encodeURIComponent(videoUrl)}" autoplay controls playsinline crossorigin="anonymous"></video>
+<video id="v" src="${isM3u8 ? "" : "/proxy?t=" + _proxyToken + "&url=" + encodeURIComponent(videoUrl)}" autoplay controls playsinline crossorigin="anonymous"></video>
 ${
   isM3u8
     ? `
@@ -706,14 +711,32 @@ function getPlayerServer() {
           res.end();
           return;
         }
+        if (
+          url.searchParams.get("t") !== _proxyToken ||
+          (req.method !== "GET" && req.method !== "HEAD")
+        ) {
+          res.writeHead(403);
+          res.end();
+          return;
+        }
         try {
           const targetUrl = new URL(target);
+          if (
+            !/^https?:$/.test(targetUrl.protocol) ||
+            !_currentVideoUrl ||
+            targetUrl.host !== new URL(_currentVideoUrl).host
+          ) {
+            res.writeHead(403);
+            res.end();
+            return;
+          }
           const lib = targetUrl.protocol === "https:" ? https : http;
           const proxyReq = lib.request(
             {
               hostname: targetUrl.hostname,
+              port: targetUrl.port || undefined,
               path: targetUrl.pathname + targetUrl.search,
-              method: req.method || "GET",
+              method: req.method,
               headers: {
                 "User-Agent":
                   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",

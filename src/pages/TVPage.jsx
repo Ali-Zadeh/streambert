@@ -434,6 +434,7 @@ export default function TVPage({
   const [playerFullscreen, setPlayerFullscreen] = useState(false);
   const [pipOpen, setPipOpen] = useState(false);
   const pipUrlRef = useRef(null);
+  const pipProgressKeyRef = useRef(null);
   const pipWebContentsIdRef = useRef(null); // cached WebContents ID of the pop-out window
   const [menuPos, setMenuPos] = useState(null);
   // AniSkip
@@ -1198,12 +1199,22 @@ export default function TVPage({
     setSkipTimings(null);
     setSkipPrompt(null);
     if (introSkipMode === "off" || !isAsync || !isAnime) return;
-    const anilistId = anilistData?.idMal;
+    const virtualSeasons =
+      useAnilistSeasons && !episodeGroupSeasons && tmdbSeasons.length <= 1;
+    const season = anilistSeasons?.find((s) => s.seasonNum === selectedSeason);
+    const malId = virtualSeasons
+      ? season?.idMal
+      : selectedSeason === 1
+        ? anilistData?.idMal
+        : season?.episodes &&
+            season.episodes === currentSeasonEpisodes.length
+          ? season.idMal
+          : null;
     const epNum = selectedEp?.episode_number;
-    if (!anilistId || !epNum) return;
+    if (!malId || !epNum) return;
 
     let cancelled = false;
-    fetchAniSkipTimings(anilistId, epNum).then((timings) => {
+    fetchAniSkipTimings(malId, epNum).then((timings) => {
       if (!cancelled) setSkipTimings(timings);
     });
     return () => {
@@ -1211,6 +1222,12 @@ export default function TVPage({
     };
   }, [
     anilistData?.idMal,
+    anilistSeasons,
+    useAnilistSeasons,
+    episodeGroupSeasons,
+    tmdbSeasons.length,
+    currentSeasonEpisodes.length,
+    selectedSeason,
     selectedEp?.episode_number,
     playerSource,
     isAnime,
@@ -1267,6 +1284,12 @@ export default function TVPage({
         try {
           const wv = webviewRef.current;
           if (!wv) return;
+
+          if (
+            pipWebContentsIdRef.current != null &&
+            pipProgressKeyRef.current !== currentProgressKey
+          )
+            return;
 
           let result;
           // When the pop-out window is open the main webview shows about:blank
@@ -1604,7 +1627,6 @@ export default function TVPage({
 
   // ── PiP pop-out: navigate main webview away so only one stream is active ──
   useEffect(() => {
-    if (!playing) return;
     const openH = window.electron?.onPipOpened?.(async () => {
       setPipOpen(true);
       pipWebContentsIdRef.current =
@@ -1612,6 +1634,7 @@ export default function TVPage({
     });
     const closeH = window.electron?.onPipClosed?.(() => {
       pipUrlRef.current = null;
+      pipProgressKeyRef.current = null;
       pipWebContentsIdRef.current = null;
       setPipOpen(false);
     });
@@ -1619,7 +1642,7 @@ export default function TVPage({
       if (openH) window.electron?.offPipOpened?.(openH);
       if (closeH) window.electron?.offPipClosed?.(closeH);
     };
-  }, [playing]);
+  }, []);
 
   const effectiveYear =
     year ||
@@ -2167,6 +2190,7 @@ export default function TVPage({
                           );
                       if (!url) return;
                       pipUrlRef.current = url;
+                      pipProgressKeyRef.current = currentProgressKey;
                       window.electron?.openPipWindow?.(
                         url,
                         item.name ?? item.title,

@@ -687,7 +687,6 @@ export default function MoviePage({
 
   // ── PiP pop-out: navigate main webview away so only one stream is active ──
   useEffect(() => {
-    if (!playing) return;
     const openH = window.electron?.onPipOpened?.(async () => {
       setPipOpen(true);
       pipWebContentsIdRef.current =
@@ -702,7 +701,7 @@ export default function MoviePage({
       if (openH) window.electron?.offPipOpened?.(openH);
       if (closeH) window.electron?.offPipClosed?.(closeH);
     };
-  }, [playing]);
+  }, []);
 
   const handleSetDownloaderFolder = useCallback((folder) => {
     setDownloaderFolder(folder);

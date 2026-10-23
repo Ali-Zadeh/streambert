@@ -208,19 +208,6 @@ function register(getMainWindow, { writeSecretMigration }) {
     return mw ? mw.isMaximized() : false;
   });
 
-  // Push maximize state to the renderer so WindowTitlebar doesn't need to poll
-  const pushMaximized = (v) => {
-    const mw = getMainWindow();
-    if (mw && !mw.isDestroyed()) mw.webContents.send("window-maximized", v);
-  };
-  const mwForEvents = getMainWindow();
-  if (mwForEvents) {
-    mwForEvents.on("maximize", () => pushMaximized(true));
-    mwForEvents.on("unmaximize", () => pushMaximized(false));
-    mwForEvents.on("enter-full-screen", () => pushMaximized(true));
-    mwForEvents.on("leave-full-screen", () => pushMaximized(false));
-  }
-
   ipcMain.handle("quit-app", () => {
     const mw = getMainWindow();
     if (mw && !mw.isDestroyed()) mw.close();

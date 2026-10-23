@@ -101,7 +101,8 @@
       ]
     },
     "mac": {
-      "identity": null,
+      "identity": "-",
+      "hardenedRuntime": false,
       "icon": "public/icon.png",
       "target": [
         {

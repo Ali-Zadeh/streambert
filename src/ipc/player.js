@@ -1,7 +1,8 @@
 // ── IPC: Player launch, window controls, auto-updater ─────────────────────────
 
 const { ipcMain, shell, app } = require("electron");
-const { spawn, spawnSync } = require("child_process");
+const { spawn, spawnSync, execFile } = require("child_process");
+const { promisify } = require("util");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -523,10 +524,61 @@ function register(getMainWindow, { writeSecretMigration }) {
         app.exit(0);
       } else if (format === "dmg") {
         sendInstalling();
-        spawn("hdiutil", ["attach", destPath], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
+        const run = promisify(execFile);
+        const appBundle = path.resolve(process.execPath, "../../..");
+        const staged = `${appBundle}.update`;
+        const old = `${appBundle}.old`;
+        try {
+          if (!app.isPackaged || !appBundle.endsWith(".app")) {
+            throw new Error("Can't locate the installed app");
+          }
+          const mountPoint = fs.mkdtempSync(
+            path.join(os.tmpdir(), "streambert-dmg-"),
+          );
+          await run("hdiutil", [
+            "attach",
+            destPath,
+            "-nobrowse",
+            "-readonly",
+            "-noautoopen",
+            "-mountpoint",
+            mountPoint,
+          ]);
+          try {
+            const newApp = fs
+              .readdirSync(mountPoint)
+              .find((f) => f.endsWith(".app"));
+            if (!newApp) throw new Error("No app found in the update");
+            fs.rmSync(staged, { recursive: true, force: true });
+            await run("ditto", [path.join(mountPoint, newApp), staged]);
+          } finally {
+            await run("hdiutil", ["detach", mountPoint, "-force"]).catch(
+              () => {},
+            );
+            try {
+              fs.rmdirSync(mountPoint);
+            } catch {}
+          }
+          fs.rmSync(old, { recursive: true, force: true });
+          fs.renameSync(appBundle, old);
+          try {
+            fs.renameSync(staged, appBundle);
+          } catch (e) {
+            fs.renameSync(old, appBundle);
+            throw e;
+          }
+        } catch (e) {
+          fs.rmSync(staged, { recursive: true, force: true });
+          shell.openPath(destPath);
+          return {
+            ok: false,
+            error: `${e.message}. The update was opened in Finder: drag Streambert to Applications.`,
+          };
+        }
+        fs.rmSync(old, { recursive: true, force: true });
+        fs.rmSync(destPath, { force: true });
+        app.relaunch();
+        app.exit(0);
       }
 
       return { ok: true };

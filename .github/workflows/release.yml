@@ -17,7 +17,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -29,7 +29,7 @@ jobs:
 
       - name: Upload notes
         if: steps.version.outputs.version != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: notes
           path: ${{ runner.temp }}/notes.md
@@ -53,12 +53,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install deps
@@ -70,7 +70,7 @@ jobs:
         run: npm run ${{ matrix.script }} -- ${{ matrix.args }} -c.extraMetadata.version=${{ needs.version.outputs.version }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-${{ matrix.os }}
           path: ${{ matrix.files }}
@@ -82,7 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: out
 

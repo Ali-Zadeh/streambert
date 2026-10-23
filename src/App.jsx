@@ -142,9 +142,7 @@ export default function App() {
   // ── Startup update check ─────────────────────────────────────────────────
   useEffect(() => {
     if (!storage.get("autoCheckUpdates")) return;
-    const source =
-      storage.get(STORAGE_KEYS.UPDATE_SOURCE) || DEFAULT_UPDATE_SOURCE;
-    checkForUpdatesWithFallback(source)
+    checkForUpdatesWithFallback(DEFAULT_UPDATE_SOURCE)
       .then((r) => {
         if (r.hasUpdate) setUpdateBanner(r);
       })
@@ -341,7 +339,7 @@ export default function App() {
     let mounted = true;
     secureStorage.get("apikey").then((val) => {
       if (!mounted) return;
-      setApiKey(val || import.meta.env.VITE_TMDB_TOKEN || null);
+      setApiKey(val || null);
       setApiKeyLoaded(true);
     });
     return () => {

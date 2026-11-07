@@ -13,6 +13,7 @@ let _updateAbortController = null;
 
 const MAX_UPDATE_BYTES = 1024 * 1024 * 1024;
 const MAX_RELEASE_JSON_CHARS = 1024 * 1024;
+const NETWORK_TIMEOUT_MS = 30000;
 
 // ── Trusted release sources for the auto-updater ──────────────────────────────
 // Same validation logic applies to every entry below, adding a new source
@@ -317,7 +318,7 @@ function register(getMainWindow, { writeSecretMigration }) {
         .slice(trustedSource.pathPrefix.length)
         .split("/")[0];
       const release = await new Promise((resolve, reject) => {
-        https
+        const lookupRequest = https
           .get(
             `${trustedSource.releaseApiBase}${releaseTag}`,
             {
@@ -353,6 +354,10 @@ function register(getMainWindow, { writeSecretMigration }) {
             },
           )
           .on("error", reject);
+        lookupRequest.setTimeout(NETWORK_TIMEOUT_MS, () => {
+          lookupRequest.destroy();
+          reject(new Error("Release lookup timed out"));
+        });
       });
       const releaseAsset = (release.assets || []).find(
         (candidate) => candidate.browser_download_url === url,
@@ -484,6 +489,10 @@ function register(getMainWindow, { writeSecretMigration }) {
             },
           );
           req.on("error", reject);
+          req.setTimeout(NETWORK_TIMEOUT_MS, () => {
+            req.destroy();
+            reject(new Error("Update download timed out"));
+          });
         };
 
         doRequest(url);

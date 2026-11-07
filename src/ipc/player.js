@@ -7,8 +7,12 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const os = require("os");
+const crypto = require("crypto");
 
 let _updateAbortController = null;
+
+const MAX_UPDATE_BYTES = 1024 * 1024 * 1024;
+const MAX_RELEASE_JSON_CHARS = 1024 * 1024;
 
 // ── Trusted release sources for the auto-updater ──────────────────────────────
 // Same validation logic applies to every entry below, adding a new source
@@ -20,6 +24,8 @@ const TRUSTED_UPDATE_SOURCES = [
     // Must match the full repo path so an attacker can't use
     // a different repo on github.com to serve a malicious binary.
     pathPrefix: "/Ali-Zadeh/streambert/releases/download/",
+    releaseApiBase:
+      "https://api.github.com/repos/Ali-Zadeh/streambert/releases/tags/",
     redirectHosts: [
       "github.com",
       "objects.githubusercontent.com",
@@ -204,7 +210,8 @@ function register(getMainWindow, { writeSecretMigration }) {
 
   // ── Get video duration via ffprobe ────────────────────────────────────────
   ipcMain.handle("get-video-duration", async (_, filePath) => {
-    if (!filePath) return { ok: false };
+    const safeFilePath = validateMediaPath(filePath, ALLOWED_MEDIA_EXTENSIONS);
+    if (!safeFilePath) return { ok: false };
     const platform = process.platform;
 
     // Probe paths for ffprobe
@@ -226,7 +233,7 @@ function register(getMainWindow, { writeSecretMigration }) {
             "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            filePath,
+            safeFilePath,
           ],
           { encoding: "utf8", timeout: 8000 },
         );
@@ -247,7 +254,7 @@ function register(getMainWindow, { writeSecretMigration }) {
 
     for (const ff of ffmpegPaths) {
       try {
-        const r = spawnSync(ff, ["-i", filePath], {
+        const r = spawnSync(ff, ["-i", safeFilePath], {
           encoding: "utf8",
           timeout: 8000,
         });
@@ -306,6 +313,61 @@ function register(getMainWindow, { writeSecretMigration }) {
       }
       const ALLOWED_REDIRECT_HOSTS = trustedSource.redirectHosts;
 
+      const releaseTag = parsed.pathname
+        .slice(trustedSource.pathPrefix.length)
+        .split("/")[0];
+      const release = await new Promise((resolve, reject) => {
+        https
+          .get(
+            `${trustedSource.releaseApiBase}${releaseTag}`,
+            {
+              headers: {
+                "User-Agent": "Streambert-AutoUpdater",
+                Accept: "application/vnd.github+json",
+              },
+            },
+            (res) => {
+              if (res.statusCode !== 200) {
+                res.resume();
+                return reject(
+                  new Error(`Release lookup failed (HTTP ${res.statusCode})`),
+                );
+              }
+              let body = "";
+              res.setEncoding("utf8");
+              res.on("data", (chunk) => {
+                body += chunk;
+                if (body.length > MAX_RELEASE_JSON_CHARS) {
+                  res.destroy();
+                  reject(new Error("Release lookup response is too large"));
+                }
+              });
+              res.on("end", () => {
+                try {
+                  resolve(JSON.parse(body));
+                } catch {
+                  reject(new Error("Release lookup returned invalid JSON"));
+                }
+              });
+              res.on("error", reject);
+            },
+          )
+          .on("error", reject);
+      });
+      const releaseAsset = (release.assets || []).find(
+        (candidate) => candidate.browser_download_url === url,
+      );
+      const publishedDigest = releaseAsset?.digest ?? "";
+      if (!publishedDigest.startsWith("sha256:")) {
+        return {
+          ok: false,
+          error: "The release has no published SHA-256 for this file",
+        };
+      }
+      const expectedSha256 = publishedDigest
+        .slice("sha256:".length)
+        .toLowerCase();
+
       _updateAbortController = new AbortController();
       const { signal } = _updateAbortController;
 
@@ -319,7 +381,12 @@ function register(getMainWindow, { writeSecretMigration }) {
               : format === "dmg"
                 ? ".dmg"
                 : ".AppImage";
-      const destPath = path.join(os.tmpdir(), `streambert-update${ext}`);
+      const updateDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "streambert-update-"),
+      );
+      const destPath = path.join(updateDir, `streambert-update${ext}`);
+
+      const hash = crypto.createHash("sha256");
 
       await new Promise((resolve, reject) => {
         if (signal.aborted) return reject(new Error("Cancelled"));
@@ -371,6 +438,10 @@ function register(getMainWindow, { writeSecretMigration }) {
               }
 
               const total = parseInt(res.headers["content-length"] || "0", 10);
+              if (total > MAX_UPDATE_BYTES) {
+                res.resume();
+                return reject(new Error("Update file is too large"));
+              }
               let downloaded = 0;
               const file = fs.createWriteStream(destPath);
 
@@ -382,6 +453,13 @@ function register(getMainWindow, { writeSecretMigration }) {
                   return;
                 }
                 downloaded += chunk.length;
+                if (downloaded > MAX_UPDATE_BYTES) {
+                  req.destroy();
+                  file.destroy();
+                  reject(new Error("Update file is too large"));
+                  return;
+                }
+                hash.update(chunk);
                 file.write(chunk);
                 const percent =
                   total > 0 ? Math.round((downloaded / total) * 100) : 0;
@@ -413,6 +491,14 @@ function register(getMainWindow, { writeSecretMigration }) {
 
       if (signal.aborted) return { ok: false, error: "Cancelled" };
 
+      if (hash.digest("hex") !== expectedSha256) {
+        fs.rmSync(updateDir, { recursive: true, force: true });
+        return {
+          ok: false,
+          error: "The downloaded file does not match the published SHA-256",
+        };
+      }
+
       // ── Helper: send "Installing…" to renderer ──────────────────────────────
       const sendInstalling = () => {
         const mw = getMainWindow();
@@ -429,7 +515,7 @@ function register(getMainWindow, { writeSecretMigration }) {
         fs.chmodSync(destPath, 0o755);
         const currentAppImage = process.env.APPIMAGE;
         if (currentAppImage) {
-          const scriptPath = path.join(os.tmpdir(), "streambert-update.sh");
+          const scriptPath = path.join(updateDir, "streambert-update.sh");
           const pid = process.pid;
           const target = currentAppImage;
           const scriptContent =

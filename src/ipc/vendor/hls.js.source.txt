@@ -1,0 +1,4 @@
+hls.js 1.7.4, Apache-2.0 (see LICENSE-hls.js)
+File: dist/hls.min.js from https://registry.npmjs.org/hls.js/-/hls.js-1.7.4.tgz
+Tarball integrity: sha512-3GlxGdPvT2YHvQYOt+yOzT/DEior/qJVNIylHA77kgeoBTdQQqi70GwefNEUmHQeNGyjC8U62+bruqW/Tpm+tg==
+hls.min.js sha256: cfc70cc9e9fc63d071919e087670abc760c8fd1bc889b88588026e4d22193bbe

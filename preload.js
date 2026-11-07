@@ -61,7 +61,6 @@ contextBridge.exposeInMainWorld("electron", {
   // anime episode resolver (main-process HTTP, bypasses CORS/bot-check)
   resolveAllManga: (args) => ipcRenderer.invoke("resolve-allmanga", args),
   setPlayerVideo: (args) => ipcRenderer.invoke("set-player-video", args),
-  debugAllManga: (args) => ipcRenderer.invoke("debug-allmanga", args),
 
   // App version (from package.json via Electron)
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),

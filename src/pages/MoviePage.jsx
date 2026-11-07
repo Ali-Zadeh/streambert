@@ -92,7 +92,12 @@ export default function MoviePage({
   const [m3u8Url, setM3u8Url] = useState(null);
   const [interceptedSubs, setInterceptedSubs] = useState([]);
   const [playerSource, setPlayerSource] = useState(
-    () => storage.get("playerSource") || NON_ANIME_DEFAULT_SOURCE,
+    () => {
+      const savedSource = storage.get("playerSource");
+      return PLAYER_SOURCES.some((source) => source.id === savedSource)
+        ? savedSource
+        : NON_ANIME_DEFAULT_SOURCE;
+    },
   );
 
   // Accent colour + subtitle lang come from App-level state (via props),
@@ -1031,7 +1036,7 @@ export default function MoviePage({
                         playerSubLang,
                       )
               }
-              partition="persist:player"
+              partition="player"
               allowpopups="false"
               sandbox="allow-scripts allow-same-origin allow-forms"
               style={{

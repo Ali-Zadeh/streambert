@@ -116,28 +116,12 @@ export const tmdbFetch = async (path, apiKey) => {
 };
 
 // Documentation:
-// https://www.videasy.to/docs
-// https://vsembed.su/api/
-// https://www.vidking.net/#documentation
+// https://vidsrc.sh/vidsrc/docs/
+// https://vidlink.pro/
 
 // ── Player Sources ────────────────────────────────────────────────────────────
 // supportsProgress: true = executeJavaScript tracking works for this source
 export const PLAYER_SOURCES = [
-  {
-    id: "videasy",
-    label: "Videasy",
-    tag: null,
-    note: null,
-    supportsProgress: true,
-    colorParam: "color", // hex without # → e.g. "e50914"
-    langParam: null, // no subtitle lang param
-    params: {
-      overlay: "true",
-    },
-    movieUrl: (id) => `https://player.videasy.to/movie/${id}`,
-    tvUrl: (id, season, ep) =>
-      `https://player.videasy.to/tv/${id}/${season}/${ep}`,
-  },
   {
     id: "vidsrc",
     label: "VidSrc",
@@ -148,24 +132,22 @@ export const PLAYER_SOURCES = [
     colorParam: null, // vidsrc doesn't support color param
     langParam: "ds_lang", // ISO 639-1 language code
     params: {},
-    movieUrl: (id) => `https://vsembed.su/embed/movie/${id}`,
+    movieUrl: (id) => `https://vidsrc.sh/embed/movie/${id}`,
     tvUrl: (id, season, ep) =>
-      `https://vsembed.su/embed/tv/${id}/${season}/${ep}`,
+      `https://vidsrc.sh/embed/tv/${id}/${season}/${ep}`,
   },
   {
-    id: "vidking",
-    label: "Vidking",
+    id: "vidlink",
+    label: "VidLink",
     tag: null,
     note: null,
-    supportsProgress: true,
-    colorParam: "color", // hex without # → e.g. "e50914"
+    supportsProgress: false,
+    colorParam: "primaryColor",
     langParam: null,
-    params: {
-      autoPlay: "true",
-    },
-    movieUrl: (id) => `https://www.vidking.net/embed/movie/${id}`,
+    params: {},
+    movieUrl: (id) => `https://vidlink.pro/movie/${id}`,
     tvUrl: (id, season, ep) =>
-      `https://www.vidking.net/embed/tv/${id}/${season}/${ep}`,
+      `https://vidlink.pro/tv/${id}/${season}/${ep}`,
   },
   {
     id: "allmanga",
@@ -199,6 +181,11 @@ export const getSourceUrl = (
   Object.entries(src.params || {}).forEach(([key, value]) => {
     url.searchParams.set(key, value);
   });
+  Object.entries(type === "tv" ? src.tvParams || {} : {}).forEach(
+    ([key, value]) => {
+      url.searchParams.set(key, value);
+    },
+  );
 
   // Inject accent color into the player if the source supports it
   if (accentColor && src.colorParam) {
@@ -456,7 +443,7 @@ export const isAnimeContent = (item, details) => {
 
 // Default sources
 export const ANIME_DEFAULT_SOURCE = "allmanga";
-export const NON_ANIME_DEFAULT_SOURCE = "vidking";
+export const NON_ANIME_DEFAULT_SOURCE = "vidsrc";
 
 // ── Episode Group fetch (localStorage + in-memory cache, 7-day TTL) ─────────
 // Episode groups almost never change -> cache aggressively across sessions.

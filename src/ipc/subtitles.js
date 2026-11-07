@@ -19,6 +19,32 @@ function fetchWithTimeout(url, options = {}, ms = 15000) {
   );
 }
 
+const SUBTITLE_MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024;
+
+async function readBodyCapped(res) {
+  if (Number(res.headers.get("content-length")) > SUBTITLE_MAX_DOWNLOAD_BYTES) {
+    throw new Error("Subtitle download is too large");
+  }
+  const chunks = [];
+  let received = 0;
+  for await (const chunk of res.body) {
+    received += chunk.length;
+    if (received > SUBTITLE_MAX_DOWNLOAD_BYTES) {
+      throw new Error("Subtitle download is too large");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function subdlDownloadUrl(fileId) {
+  const subdlPath = decodeURIComponent(
+    String(fileId).split("_").slice(2).join("_"),
+  );
+  if (!subdlPath.startsWith("/")) return null;
+  return `https://dl.subdl.com${subdlPath}`;
+}
+
 // ── ZIP subtitle extractor ────────────────────────────────────────────────────
 
 // Max decompressed zip size (10mb) to prevent zip-bombs
@@ -291,9 +317,10 @@ function register({ getDownloads, saveDownloads }) {
   ipcMain.handle("get-subtitle-url", async (_, { fileId }) => {
     try {
       if (String(fileId).startsWith("subdl_")) {
-        const parts = String(fileId).split("_");
-        const subdlPath = decodeURIComponent(parts.slice(2).join("_"));
-        const downloadUrl = `https://dl.subdl.com${subdlPath}`;
+        const downloadUrl = subdlDownloadUrl(fileId);
+        if (!downloadUrl) {
+          return { ok: false, error: "Invalid SubDL subtitle id" };
+        }
         const res = await fetchWithTimeout(
           downloadUrl,
           { headers: { "User-Agent": "Streambert" } },
@@ -301,7 +328,7 @@ function register({ getDownloads, saveDownloads }) {
         );
         if (!res.ok)
           return { ok: false, error: `SubDL download error ${res.status}` };
-        const zipBuffer = Buffer.from(await res.arrayBuffer());
+        const zipBuffer = await readBodyCapped(res);
         const extracted = extractFirstSubtitleFromZip(zipBuffer);
         if (!extracted)
           return { ok: false, error: "No subtitle file found in SubDL ZIP" };
@@ -406,15 +433,15 @@ function register({ getDownloads, saveDownloads }) {
             let fileData, ext;
 
             if (String(sub.file_id).startsWith("subdl_")) {
-              const parts = String(sub.file_id).split("_");
-              const subdlPath = decodeURIComponent(parts.slice(2).join("_"));
+              const downloadUrl = subdlDownloadUrl(sub.file_id);
+              if (!downloadUrl) continue;
               const res = await fetchWithTimeout(
-                `https://dl.subdl.com${subdlPath}`,
+                downloadUrl,
                 { headers: { "User-Agent": "Streambert" } },
                 30000,
               );
               if (!res.ok) continue;
-              const zipBuf = Buffer.from(await res.arrayBuffer());
+              const zipBuf = await readBodyCapped(res);
               const extracted = extractFirstSubtitleFromZip(zipBuf);
               if (!extracted) continue;
               fileData = extracted.data;
@@ -430,9 +457,10 @@ function register({ getDownloads, saveDownloads }) {
                     )
                   : null);
               if (!url) continue;
+              if (new URL(url).protocol !== "https:") continue;
               const res = await fetchWithTimeout(url, {}, 30000);
               if (!res.ok) continue;
-              fileData = Buffer.from(await res.arrayBuffer());
+              fileData = await readBodyCapped(res);
               const urlExt = url.split("?")[0].split(".").pop().toLowerCase();
               ext = SUBTITLE_EXTS.has(urlExt) ? urlExt : "srt";
             }

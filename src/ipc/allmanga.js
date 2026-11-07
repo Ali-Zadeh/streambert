@@ -7,6 +7,8 @@ const { ipcMain } = require("electron");
 const https = require("https");
 const http = require("http");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 // ── AllAnime hex cipher (from ani-cli) ────────────────────────────────────────
 
@@ -572,19 +574,28 @@ async function trySourceUrls(sourceUrls) {
 
         // Direct CDN video (mp4/m3u8/googlevideo) → play immediately
         let isGoogleVideoHost = false;
+        let isYoutubeWatchPage = false;
         try {
           const parsedFinalUrl = new URL(finalUrl);
           const host = parsedFinalUrl.hostname.toLowerCase();
           isGoogleVideoHost =
             host === "googlevideo.com" || host.endsWith(".googlevideo.com");
+          isYoutubeWatchPage =
+            host === "youtu.be" ||
+            ([
+              "youtube.com",
+              "www.youtube.com",
+              "m.youtube.com",
+              "music.youtube.com",
+            ].includes(host) &&
+              parsedFinalUrl.pathname === "/watch");
         } catch {
           isGoogleVideoHost = false;
         }
         if (
           /\.(mp4|webm|mkv|m3u8)(\?|$)/i.test(finalUrl) ||
           isGoogleVideoHost ||
-          (!finalUrl.includes("youtube.com/watch") &&
-            !finalUrl.includes("youtu.be/"))
+          !isYoutubeWatchPage
         ) {
           return {
             ok: true,
@@ -663,7 +674,7 @@ function buildPlayerHtml(videoUrl, startTime) {
 ${
   isM3u8
     ? `
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+<script src="/hls.min.js"></script>
 <script>
   const video=document.getElementById('v');
   const src=decodeURIComponent("${encodeURIComponent(videoUrl)}");
@@ -691,6 +702,16 @@ function getPlayerServer() {
   if (_playerServer) return Promise.resolve(_playerServer);
   return new Promise((resolve, reject) => {
     const server = http.createServer((req, res) => {
+      const { port } = server.address();
+      if (
+        req.headers.host !== `127.0.0.1:${port}` &&
+        req.headers.host !== `localhost:${port}`
+      ) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+
       const url = new URL(req.url, "http://localhost");
 
       if (url.pathname === "/player" || url.pathname === "/") {
@@ -701,6 +722,19 @@ function getPlayerServer() {
         res.end(
           buildPlayerHtml(_currentVideoUrl || "", _currentVideoStartTime || 0),
         );
+        return;
+      }
+
+      if (url.pathname === "/hls.min.js") {
+        res.writeHead(200, {
+          "Content-Type": "text/javascript",
+          "Cache-Control": "no-store",
+        });
+        const hlsScript = fs.createReadStream(
+          path.join(__dirname, "vendor", "hls.min.js"),
+        );
+        hlsScript.on("error", () => res.destroy());
+        hlsScript.pipe(res);
         return;
       }
 
@@ -956,67 +990,6 @@ function register() {
       }
     },
   );
-
-  ipcMain.handle("debug-allmanga", async (_, args) => {
-    try {
-      if (args.path) {
-        const url = args.path.startsWith("http")
-          ? args.path
-          : "https://allmanga.to" + args.path;
-        const r = await httpsGet(url);
-        return { status: r.status, body: r.body.slice(0, 3000) };
-      }
-      if (args.showId) {
-        const vars = {
-          showId: args.showId,
-          translationType: "sub",
-          episodeString: String(args.epNum || 1),
-        };
-        const r = await allanimeGQLEpisode(vars);
-        let parsed;
-        try {
-          parsed = JSON.parse(r.body);
-        } catch {}
-        const decodedUrls = parseEpisodeSourceUrls(r.body);
-        if (decodedUrls?.length) {
-          parsed._decoded = decodedUrls
-            .filter((s) => s.sourceUrl?.startsWith("--"))
-            .map((s) => {
-              const p = decodeAllanimeUrl(s.sourceUrl).replace(
-                "/clock",
-                "/clock.json",
-              );
-              const fetchUrl = p.startsWith("//")
-                ? "https:" + p
-                : p.startsWith("/")
-                  ? "https://allanime.day" + p
-                  : p.startsWith("http")
-                    ? p
-                    : "https://allanime.day/" + p;
-              return { sourceName: s.sourceName, path: p, fetchUrl };
-            });
-        }
-        return { status: r.status, parsed, raw: r.body.slice(0, 2000) };
-      }
-      const season = args.season || 1;
-      const resolvedTitle = await anilistSeasonTitle(args.title || "", season);
-      const vars = {
-        search: {
-          allowAdult: true,
-          allowUnknown: false,
-          query: resolvedTitle.toLowerCase(),
-        },
-        limit: 10,
-        page: 1,
-        translationType: "sub",
-        countryOrigin: "ALL",
-      };
-      const r = await allanimeGQL(vars, SEARCH_GQL);
-      return { resolvedTitle, status: r.status, body: r.body.slice(0, 3000) };
-    } catch (e) {
-      return { error: e.message };
-    }
-  });
 }
 
 module.exports = { register };

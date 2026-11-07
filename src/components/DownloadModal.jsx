@@ -1119,8 +1119,8 @@ export default function DownloadModal({
                         {(downloader.reason === "no_executable" ||
                           !downloader.reason) && (
                           <>
-                            No executable binary found. On Linux, make sure the
-                            binary has execute permissions (
+                            No executable named <code>vid-dl</code> found. On
+                            Linux, make sure the binary has execute permissions (
                             <code>chmod +x</code>
                             ).
                           </>

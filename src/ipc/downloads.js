@@ -10,6 +10,8 @@ const https = require("https");
 const http = require("http");
 const os = require("os");
 
+const DOWNLOADER_BINARY_PATTERN = /^vid-dl(\.exe)?$/i;
+
 // ── Download store ────────────────────────────────────────────────────────────
 
 let downloads = [];
@@ -122,13 +124,31 @@ function killAllDownloads() {
 
 // ── Subtitle file downloader (used during run-download completion) ─────────────
 
-function downloadSubtitleFile(url, destPath) {
+const SUBTITLE_MAX_BYTES = 10 * 1024 * 1024;
+const SUBTITLE_MAX_REDIRECTS = 3;
+
+function downloadSubtitleFile({
+  url,
+  destPath,
+  redirectsLeft = SUBTITLE_MAX_REDIRECTS,
+}) {
   return new Promise((resolve) => {
     try {
       const parsedUrl = new URL(url);
       if (parsedUrl.protocol === "file:") {
         try {
-          fs.copyFileSync(decodeURIComponent(parsedUrl.pathname), destPath);
+          const sourcePath = fs.realpathSync(
+            decodeURIComponent(parsedUrl.pathname),
+          );
+          const tempDir = fs.realpathSync(os.tmpdir());
+          const isOwnTempSubtitle =
+            path.dirname(sourcePath) === tempDir &&
+            path.basename(sourcePath).startsWith("streambert_sub_");
+          if (!isOwnTempSubtitle) {
+            resolve(false);
+            return;
+          }
+          fs.copyFileSync(sourcePath, destPath);
           resolve(true);
         } catch {
           resolve(false);
@@ -152,10 +172,19 @@ function downloadSubtitleFile(url, destPath) {
             res.statusCode < 400 &&
             res.headers.location
           ) {
+            if (redirectsLeft <= 0) {
+              res.resume();
+              resolve(false);
+              return;
+            }
             const loc = res.headers.location.startsWith("http")
               ? res.headers.location
               : parsedUrl.origin + res.headers.location;
-            downloadSubtitleFile(loc, destPath).then(resolve);
+            downloadSubtitleFile({
+              url: loc,
+              destPath,
+              redirectsLeft: redirectsLeft - 1,
+            }).then(resolve);
             return;
           }
           if (res.statusCode !== 200) {
@@ -163,11 +192,32 @@ function downloadSubtitleFile(url, destPath) {
             resolve(false);
             return;
           }
+          if (Number(res.headers["content-length"]) > SUBTITLE_MAX_BYTES) {
+            res.resume();
+            resolve(false);
+            return;
+          }
           const file = fs.createWriteStream(destPath);
+          let received = 0;
+          let tooLarge = false;
+          res.on("data", (chunk) => {
+            received += chunk.length;
+            if (tooLarge || received <= SUBTITLE_MAX_BYTES) return;
+            tooLarge = true;
+            res.destroy();
+            file.destroy();
+          });
           res.pipe(file);
           file.on("finish", () => {
             file.close();
             resolve(true);
+          });
+          file.on("close", () => {
+            if (!tooLarge) return;
+            try {
+              fs.unlinkSync(destPath);
+            } catch {}
+            resolve(false);
           });
           file.on("error", () => {
             try {
@@ -175,7 +225,9 @@ function downloadSubtitleFile(url, destPath) {
             } catch {}
             resolve(false);
           });
-          res.on("error", () => resolve(false));
+          res.on("error", () => {
+            if (!tooLarge) resolve(false);
+          });
         },
       );
       req.on("error", () => resolve(false));
@@ -209,7 +261,7 @@ function register(getMainWindow) {
       return { exists: false, reason: "no_internal" };
     }
     const binary = entries.find((e) => {
-      if (e === "_internal" || e.startsWith(".")) return false;
+      if (!DOWNLOADER_BINARY_PATTERN.test(e)) return false;
       try {
         const stat = fs.statSync(path.join(folderPath, e));
         if (!stat.isFile()) return false;
@@ -684,7 +736,10 @@ function register(getMainWindow) {
                 langCounter[safeLang] = lIdx + 1;
                 const suffix = lIdx > 0 ? `.${lIdx}` : "";
                 const subDestPath = `${videoBase}.${safeLang}${suffix}${subExt}`;
-                return downloadSubtitleFile(url, subDestPath).then((ok) =>
+                return downloadSubtitleFile({
+                  url,
+                  destPath: subDestPath,
+                }).then((ok) =>
                   ok
                     ? {
                         lang: lang || "unknown",

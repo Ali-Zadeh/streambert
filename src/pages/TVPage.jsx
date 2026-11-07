@@ -431,7 +431,12 @@ export default function TVPage({
   const [m3u8Url, setM3u8Url] = useState(null);
   const [interceptedSubs, setInterceptedSubs] = useState([]);
   const [playerSource, setPlayerSource] = useState(
-    () => storage.get("playerSource") || NON_ANIME_DEFAULT_SOURCE,
+    () => {
+      const savedSource = storage.get("playerSource");
+      return PLAYER_SOURCES.some((source) => source.id === savedSource)
+        ? savedSource
+        : NON_ANIME_DEFAULT_SOURCE;
+    },
   );
   // Accent colour + subtitle lang come from App-level state (via props),
   // so they are always fresh after Settings save without any extra storage reads.
@@ -2129,7 +2134,7 @@ export default function TVPage({
                             playerSubLang,
                           ) || "about:blank"
                   }
-                  partition="persist:player"
+                  partition="player"
                   allowpopups="false"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                   style={{

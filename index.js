@@ -107,13 +107,35 @@ const getMainWindow = () => mainWindow;
 const playerWcIds = new Set();
 let sessionsConfigured = false;
 
+const PLAYER_TOP_LEVEL_HOSTS = new Set([
+  "vidsrc.sh",
+  "vidsrc.me",
+  "vidlink.pro",
+  "anyembed.xyz",
+]);
+
+function isAllowedPlayerUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    return (
+      url.protocol === "https:" && PLAYER_TOP_LEVEL_HOSTS.has(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function setupSession(playerSession, trailerSession) {
   const stripHeaders = (details, callback) => {
     const headers = { ...details.responseHeaders };
     for (const key of Object.keys(headers)) {
       const lower = key.toLowerCase();
-      if (lower === "x-frame-options" || lower === "content-security-policy")
-        delete headers[key];
+      if (lower === "x-frame-options") delete headers[key];
+      if (lower === "content-security-policy") {
+        headers[key] = headers[key].map((value) =>
+          value.replace(/(?:^|;)\s*frame-ancestors[^;]*(?:;|$)/gi, ";"),
+        );
+      }
     }
     callback({ responseHeaders: headers });
   };
@@ -131,6 +153,18 @@ function setupSession(playerSession, trailerSession) {
     { urls: ["*://*/*"] },
     stripHeaders,
   );
+
+  playerSession.setPermissionRequestHandler((_, permission, callback) =>
+    callback(false),
+  );
+  playerSession.setPermissionCheckHandler(() => false);
+  playerSession.on("will-download", (event) => event.preventDefault());
+
+  trailerSession.setPermissionRequestHandler((_, permission, callback) =>
+    callback(false),
+  );
+  trailerSession.setPermissionCheckHandler(() => false);
+  trailerSession.on("will-download", (event) => event.preventDefault());
 
   // Trailer: block ads only (no media intercept needed)
   trailerSession.webRequest.onBeforeRequest({ urls: BLOCKED_HOSTS }, (_, cb) =>
@@ -263,20 +297,37 @@ function createWindow() {
   mainWindow.webContents.on("did-attach-webview", (_, wc) => {
     if (!sessionsConfigured) {
       sessionsConfigured = true;
-      const playerSession = session.fromPartition("persist:player");
+      const playerSession = session.fromPartition("player");
       const trailerSession = session.fromPartition("persist:trailer");
       setupSession(playerSession, trailerSession);
     }
 
     // Track player webviews for cleanup on player-stopped
     try {
-      if (wc.session === session.fromPartition("persist:player")) {
+      if (wc.session === session.fromPartition("player")) {
         playerWcIds.add(wc.id);
         wc.once("destroyed", () => playerWcIds.delete(wc.id));
       }
     } catch {}
 
     wc.setWindowOpenHandler(() => ({ action: "deny" }));
+    wc.on("will-navigate", (event, url) => {
+      if (!isAllowedPlayerUrl(url) && url !== "about:blank") {
+        event.preventDefault();
+      }
+    });
+    const isPlayerGuest = wc.session === session.fromPartition("player");
+    wc.on("will-redirect", (event, url) => {
+      if (isPlayerGuest) {
+        if (!isAllowedPlayerUrl(url)) event.preventDefault();
+        return;
+      }
+      let protocol = null;
+      try {
+        protocol = new URL(url).protocol;
+      } catch {}
+      if (protocol !== "https:") event.preventDefault();
+    });
     wc.on("enter-html-full-screen", () =>
       mainWindow.webContents.send("webview-enter-fullscreen"),
     );
@@ -302,7 +353,11 @@ function createWindow() {
       delete webPreferences.preload;
       webPreferences.nodeIntegration = false;
       webPreferences.contextIsolation = true;
-      if (!["persist:player", "persist:trailer"].includes(params.partition)) {
+      webPreferences.sandbox = true;
+      webPreferences.webSecurity = true;
+      webPreferences.allowRunningInsecureContent = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      if (!["player", "persist:trailer"].includes(params.partition)) {
         e.preventDefault();
       }
     },
@@ -383,7 +438,7 @@ ipcMain.on("player-stopped", () => {
 
   // Step 2: Flush HTTP + shader caches from the player session.
   try {
-    const ps = session.fromPartition("persist:player");
+    const ps = session.fromPartition("player");
     ps.clearCache().catch(() => {});
     ps.clearStorageData({ storages: ["shadercache", "cachestorage"] }).catch(
       () => {},
@@ -425,11 +480,14 @@ const getPipWindow = () => pipWindow;
 
 ipcMain.handle("open-pip-window", (_, { url, title }) => {
   if (!url || url === "about:blank") return { ok: false, reason: "no-url" };
+  if (!isAllowedPlayerUrl(url)) {
+    return { ok: false, reason: "blocked-player-url" };
+  }
 
-  // Guarantee tracker/ad blocking is active in persist:player before any load
+  // Guarantee tracker/ad blocking is active in the player session before any load
   if (!sessionsConfigured) {
     sessionsConfigured = true;
-    const playerSession = session.fromPartition("persist:player");
+    const playerSession = session.fromPartition("player");
     const trailerSession = session.fromPartition("persist:trailer");
     setupSession(playerSession, trailerSession);
   }
@@ -452,7 +510,7 @@ ipcMain.handle("open-pip-window", (_, { url, title }) => {
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     frame: process.platform !== "win32",
     webPreferences: {
-      partition: "persist:player",
+      partition: "player",
       nodeIntegration: false,
       contextIsolation: true,
       // Injects the custom title bar and wires window-control IPC
@@ -462,6 +520,14 @@ ipcMain.handle("open-pip-window", (_, { url, title }) => {
 
   // Block all popup windows from the streaming site and any nested frames
   pipWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  pipWindow.webContents.on("will-navigate", (event, targetUrl) => {
+    if (!isAllowedPlayerUrl(targetUrl) && targetUrl !== "about:blank") {
+      event.preventDefault();
+    }
+  });
+  pipWindow.webContents.on("will-redirect", (event, targetUrl) => {
+    if (!isAllowedPlayerUrl(targetUrl)) event.preventDefault();
+  });
 
   // If the site uses <webview> elements (unlikely but safe), block there too
   pipWindow.webContents.on("did-attach-webview", (_, wc) => {

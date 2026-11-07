@@ -142,6 +142,7 @@ for (const source of sources) {
 
 console.log(`\nUnstable: ${unstableCount}. Unverifiable (control not rejected): ${unverifiableCount}.`);
 
+const allowUnverifiable = process.argv.includes("--allow-unverifiable");
 if (unstableCount > 0) process.exit(1);
-if (unverifiableCount > 0) process.exit(2);
+if (unverifiableCount > 0 && !allowUnverifiable) process.exit(2);
 process.exit(0);

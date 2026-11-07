@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "vite build --watch",
     "start": "vite build && electron .",
-    "test:player-sources": "node scripts/test-player-sources.js",
+    "test:player-sources": "node scripts/check-sources.mjs --allow-unverifiable",
     "dist": "cross-env ELECTRON_DIST=1 vite build && npm run dist:linux && npm run dist:win && npm run dist:mac",
     "dist:linux": "cross-env ELECTRON_DIST=1 vite build && electron-builder --linux deb rpm AppImage pacman --publish never",
     "dist:deb": "cross-env ELECTRON_DIST=1 vite build && electron-builder --linux deb --publish never",

@@ -347,7 +347,24 @@ async function main() {
     });
   }
   record("trailer session: permissions denied", trailerPermissionDenied);
-  record("trailer session: permission check denies", trailerSession.permissionCheckHandler ? trailerSession.permissionCheckHandler() === false : false);
+  record("trailer session: permission check denies", trailerSession.permissionCheckHandler ? trailerSession.permissionCheckHandler(null, "media") === false : false);
+  for (const partition of ["player", "persist:trailer"]) {
+    const guestSession = getSession(partition);
+    let mediaGranted = null;
+    let fullscreenGranted = null;
+    if (guestSession.permissionRequestHandler) {
+      guestSession.permissionRequestHandler(null, "media", (granted) => {
+        mediaGranted = granted;
+      });
+      guestSession.permissionRequestHandler(null, "fullscreen", (granted) => {
+        fullscreenGranted = granted;
+      });
+    }
+    record(`${partition} session: media permission denied`, mediaGranted === false);
+    record(`${partition} session: fullscreen permission granted`, fullscreenGranted === true);
+    record(`${partition} session: fullscreen permission check allowed`, guestSession.permissionCheckHandler ? guestSession.permissionCheckHandler(null, "fullscreen") === true : false);
+    record(`${partition} session: media permission check denied`, guestSession.permissionCheckHandler ? guestSession.permissionCheckHandler(null, "media") === false : false);
+  }
   const downloadEvent = makeEvent();
   trailerSession.emit("will-download", downloadEvent);
   record("trailer session: downloads blocked", downloadEvent.prevented === true);

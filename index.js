@@ -155,15 +155,19 @@ function setupSession(playerSession, trailerSession) {
   );
 
   playerSession.setPermissionRequestHandler((_, permission, callback) =>
-    callback(false),
+    callback(permission === "fullscreen"),
   );
-  playerSession.setPermissionCheckHandler(() => false);
+  playerSession.setPermissionCheckHandler(
+    (_, permission) => permission === "fullscreen",
+  );
   playerSession.on("will-download", (event) => event.preventDefault());
 
   trailerSession.setPermissionRequestHandler((_, permission, callback) =>
-    callback(false),
+    callback(permission === "fullscreen"),
   );
-  trailerSession.setPermissionCheckHandler(() => false);
+  trailerSession.setPermissionCheckHandler(
+    (_, permission) => permission === "fullscreen",
+  );
   trailerSession.on("will-download", (event) => event.preventDefault());
 
   // Trailer: block ads only (no media intercept needed)

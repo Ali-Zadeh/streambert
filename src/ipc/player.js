@@ -672,7 +672,16 @@ function register(getMainWindow, { writeSecretMigration }) {
         }
         fs.rmSync(old, { recursive: true, force: true });
         fs.rmSync(destPath, { force: true });
-        app.relaunch();
+        spawn(
+          "/bin/sh",
+          [
+            "-c",
+            'for attempt in $(seq 100); do pgrep -a -f "$1/Contents/" > /dev/null || break; sleep 0.2; done; open "$1"',
+            "streambert-reopen",
+            appBundle,
+          ],
+          { detached: true, stdio: "ignore" },
+        ).unref();
         app.exit(0);
       }
 
